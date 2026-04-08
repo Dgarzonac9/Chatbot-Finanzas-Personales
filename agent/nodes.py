@@ -5,6 +5,9 @@ from contextlib import contextmanager
 from datetime import date
 from dotenv import load_dotenv
 from groq import Groq
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 load_dotenv()
 
@@ -36,6 +39,44 @@ def get_conn():
     finally:
         _pool.putconn(conn)    # siempre devuelve la conexión al pool
 
+def _buscar_vaca(cur, user_id: int, nombre_vaca: str):
+    """
+    Busca una vaca por nombre de forma flexible.
+    Primero intenta LIKE, si no encuentra intenta palabra por palabra.
+    """
+    # Intento 1: búsqueda normal
+    cur.execute(
+        "SELECT id, nombre, num_personas FROM vacas WHERE user_id = %s AND LOWER(nombre) LIKE LOWER(%s) ORDER BY id DESC LIMIT 1",
+        (user_id, f"%{nombre_vaca}%"),
+    )
+    row = cur.fetchone()
+    if row:
+        return row
+
+    # Intento 2: buscar por palabras individuales (ignora artículos cortos)
+    palabras = [p for p in nombre_vaca.split() if len(p) > 3]
+    for palabra in palabras:
+        cur.execute(
+            "SELECT id, nombre, num_personas FROM vacas WHERE user_id = %s AND LOWER(nombre) LIKE LOWER(%s) ORDER BY id DESC LIMIT 1",
+            (user_id, f"%{palabra}%"),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
+
+    # Intento 3: mostrar todas las vacas del usuario para que elija
+    return None
+
+def _listar_vacas(cur, user_id: int) -> str:
+    """Devuelve string con todas las vacas activas del usuario."""
+    cur.execute(
+        "SELECT id, nombre FROM vacas WHERE user_id = %s AND cerrada = FALSE ORDER BY id DESC",
+        (user_id,),
+    )
+    vacas = cur.fetchall()
+    if not vacas:
+        return None
+    return "\n".join([f"  {i+1}️⃣ *{v[1]}* (ID: {v[0]})" for i, v in enumerate(vacas)])
 
 # ── Utilidades ─────────────────────────────────────────────────────────────
 
@@ -48,11 +89,17 @@ def _validar_user_id(state: dict) -> int:
 
 
 def extraer_gasto_llm(texto: str):
-    """Extrae categoría, monto y fecha de un texto usando el LLM."""
     prompt = f"""
-    Extrae del texto el gasto en JSON:
-    {{"categoría": "...", "monto": ..., "fecha": "YYYY-MM-DD"}}
-    Si no hay fecha explícita usa hoy: {date.today()}.
+    El usuario puede escribir con errores ortográficos o de forma informal.
+    Interpreta el mensaje de forma flexible y extrae lo mejor que puedas.
+
+    El usuario quiere agregar gastos a una vaca grupal.
+    Extrae en JSON:
+    {{
+    "nombre_vaca": "...",
+    "gastos": [{{"descripcion": "...", "monto": ...}}, ...]
+    }}
+    Si el nombre tiene errores ortográficos, extrae igual la palabra más similar.
     Texto: "{texto}"
     """
     resp = client.chat.completions.create(
@@ -394,7 +441,7 @@ def agregar_vaca(state: dict) -> dict:
     texto = state["input"]
 
     prompt = f"""
-    El usuario quiere agregar gastos a una vaca grupal.
+    El usuario puede escribir con errores ortográficos.
     Extrae en JSON:
     {{
       "nombre_vaca": "...",
@@ -412,18 +459,19 @@ def agregar_vaca(state: dict) -> dict:
         nombre_vaca = params.get("nombre_vaca", "")
         gastos = params.get("gastos", [])
     except Exception:
-        return {"output": "No pude entender los gastos. Intenta: 'agregar a vaca Salida: comida 50000, trago 30000'"}
+        return {"output": "No pude entender. Intenta: 'agregar a vaca Salida: comida 50000'"}
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM vacas WHERE user_id = %s AND LOWER(nombre) LIKE LOWER(%s) AND cerrada = FALSE ORDER BY id DESC LIMIT 1",
-                (user_id, f"%{nombre_vaca}%"),
-            )
-            row = cur.fetchone()
+            row = _buscar_vaca(cur, user_id, nombre_vaca)
             if not row:
-                return {"output": f"No encontré una vaca con el nombre '{nombre_vaca}'. ¿Ya la creaste?"}
+                lista = _listar_vacas(cur, user_id)
+                if lista:
+                    return {"output": f"No encontré esa vaca. Tus vacas activas son:\n{lista}"}
+                return {"output": "No tienes vacas activas. Crea una con 'crear vaca Nombre'"}
+
             vaca_id = row[0]
+            nombre_real = row[1]
 
             for g in gastos:
                 cur.execute(
@@ -435,8 +483,7 @@ def agregar_vaca(state: dict) -> dict:
             total = cur.fetchone()[0]
 
     desglose = ", ".join([f"{g['descripcion']}: ${int(g['monto']):,}" for g in gastos])
-    return {"output": f"✅ Gastos agregados a *{nombre_vaca}*:\n{desglose}\n\n💰 Total acumulado: ${int(total):,}"}
-
+    return {"output": f"✅ Gastos agregados a *{nombre_real}*:\n{desglose}\n\n💰 Total acumulado: ${int(total):,}"}
 
 # ── Nodo 9: Dividir vaca ───────────────────────────────────────────────────
 
@@ -557,8 +604,37 @@ def resumen_vaca(state: dict) -> dict:
         f"➗ Por persona: {por_persona}"
     )}
 
+# ── Nodo 11: Mis Vacas ────────────────────────────────────────────────────────
+def mis_vacas(state: dict) -> dict:
+    user_id = _validar_user_id(state)
 
-# ── Nodo 11: Registrar deuda ───────────────────────────────────────────────
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT v.id, v.nombre, v.num_personas, 
+                       COALESCE(SUM(vg.monto), 0) as total
+                FROM vacas v
+                LEFT JOIN vaca_gastos vg ON v.id = vg.id
+                WHERE v.user_id = %s AND v.cerrada = FALSE
+                GROUP BY v.id, v.nombre, v.num_personas
+                ORDER BY v.id DESC
+                """,
+                (user_id,),
+            )
+            vacas = cur.fetchall()
+
+    if not vacas:
+        return {"output": "No tienes vacas activas. Crea una con 'crear vaca Nombre' 🐄"}
+
+    lista = "\n".join([
+        f"  {i+1}️⃣ *{v[1]}* — Total: ${int(v[3]):,} | 👥 {v[2]} personas"
+        for i, v in enumerate(vacas)
+    ])
+
+    return {"output": f"🐄 *Tus vacas activas:*\n\n{lista}\n\nPara agregar gastos escribe:\n'agregar vaca [nombre]: item monto'"}
+
+# ── Nodo 12: Registrar deuda ───────────────────────────────────────────────
 
 def registrar_deuda(state: dict) -> dict:
     user_id = _validar_user_id(state)
@@ -604,7 +680,7 @@ def registrar_deuda(state: dict) -> dict:
         return {"output": f"✅ Registrado: le debes ${monto:,} a *{persona}*\n📝 {desc}"}
 
 
-# ── Nodo 12: Consultar deudas ──────────────────────────────────────────────
+# ── Nodo 13: Consultar deudas ──────────────────────────────────────────────
 
 def consultar_deudas(state: dict) -> dict:
     user_id = _validar_user_id(state)
@@ -640,7 +716,7 @@ def consultar_deudas(state: dict) -> dict:
     return {"output": respuesta}
 
 
-# ── Nodo 13: Pagar deuda ───────────────────────────────────────────────────
+# ── Nodo 14: Pagar deuda ───────────────────────────────────────────────────
 
 def pagar_deuda(state: dict) -> dict:
     user_id = _validar_user_id(state)
@@ -675,7 +751,7 @@ def pagar_deuda(state: dict) -> dict:
     else:
         return {"output": f"No encontré deuda pendiente con '{persona}'."}
     
-# ── Nodo 14: Registrar ingreso ─────────────────────────────────────────────
+# ── Nodo 15: Registrar ingreso ─────────────────────────────────────────────
 
 def registrar_ingreso(state: dict) -> dict:
     user_id = _validar_user_id(state)
@@ -715,7 +791,7 @@ def registrar_ingreso(state: dict) -> dict:
     return {"output": f"✅ Ingreso registrado\n💵 {descripcion}: ${int(monto):,}\n📅 Fecha: {fecha}"}
 
 
-# ── Nodo 15: Ver ingresos del mes ──────────────────────────────────────────
+# ── Nodo 16: Ver ingresos del mes ──────────────────────────────────────────
 
 def ver_ingresos(state: dict) -> dict:
     user_id = _validar_user_id(state)
@@ -742,7 +818,7 @@ def ver_ingresos(state: dict) -> dict:
     return {"output": f"💵 *Ingresos de {mes}*\n\n{detalle}\n\n💰 Total: ${int(total):,}"}
 
 
-# ── Nodo 16: Balance real del mes ──────────────────────────────────────────
+# ── Nodo 17: Balance real del mes ──────────────────────────────────────────
 
 def balance_mes(state: dict) -> dict:
     user_id = _validar_user_id(state)
@@ -779,3 +855,193 @@ def balance_mes(state: dict) -> dict:
         f"─────────────────\n"
         f"{emoji} Balance {estado}: ${int(balance):,}"
     )}
+
+# ── Nodo 18: Generar y enviar Excel ───────────────────────────────────────────
+
+def generar_excel(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    texto = state["input"]
+
+    prompt = f"""
+    El usuario quiere un reporte Excel de sus finanzas.
+    Extrae en JSON: {{"mes": "YYYY-MM"}}
+    Si no menciona mes específico usa el mes actual: {date.today().strftime("%Y-%m")}
+    Texto: "{texto}"
+    """
+    resp = client.chat.completions.create(
+        model=MODELO_LLM,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    )
+    try:
+        params = json.loads(resp.choices[0].message.content)
+        mes = params.get("mes", date.today().strftime("%Y-%m"))
+    except Exception:
+        mes = date.today().strftime("%Y-%m")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # Gastos
+            cur.execute(
+                """
+                SELECT categoria, monto, fecha
+                FROM gastos
+                WHERE user_id = %s AND TO_CHAR(fecha, 'YYYY-MM') = %s
+                ORDER BY fecha DESC
+                """,
+                (user_id, mes),
+            )
+            gastos = cur.fetchall()
+
+            # Ingresos
+            cur.execute(
+                """
+                SELECT descripcion, monto, fecha
+                FROM ingresos
+                WHERE user_id = %s AND TO_CHAR(fecha, 'YYYY-MM') = %s
+                ORDER BY fecha DESC
+                """,
+                (user_id, mes),
+            )
+            ingresos = cur.fetchall()
+
+            # Deudas pendientes
+            cur.execute(
+                """
+                SELECT tipo, persona, monto, descripcion, fecha
+                FROM deudas
+                WHERE user_id = %s AND pagado = FALSE
+                ORDER BY fecha DESC
+                """,
+                (user_id,),
+            )
+            deudas = cur.fetchall()
+
+            # Vacas
+            cur.execute(
+                """
+                SELECT v.nombre, v.num_personas, 
+                       COALESCE(SUM(vg.monto), 0) as total
+                FROM vacas v
+                LEFT JOIN vaca_gastos vg ON v.id = vg.id
+                WHERE v.user_id = %s
+                GROUP BY v.id, v.nombre, v.num_personas
+                ORDER BY v.fecha_creacion DESC
+                """,
+                (user_id,),
+            )
+            vacas = cur.fetchall()
+
+    # ── Crear Excel ─────────────────────────────────────────────────────────
+    wb = openpyxl.Workbook()
+
+    # Estilos
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill_green = PatternFill("solid", fgColor="1E7E34")
+    header_fill_blue = PatternFill("solid", fgColor="0056B3")
+    header_fill_orange = PatternFill("solid", fgColor="D97000")
+    header_fill_purple = PatternFill("solid", fgColor="6F42C1")
+    center = Alignment(horizontal="center")
+
+    def estilo_header(ws, fila, columnas, fill):
+        for col in range(1, columnas + 1):
+            cell = ws.cell(row=fila, column=col)
+            cell.font = header_font
+            cell.fill = fill
+            cell.alignment = center
+
+    def autoajustar(ws):
+        for col in ws.columns:
+            max_len = max((len(str(c.value or "")) for c in col), default=10)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 4
+
+    # ── Hoja 1: Gastos ──────────────────────────────────────────────────────
+    ws1 = wb.active
+    ws1.title = f"Gastos {mes}"
+    ws1.append(["Categoría", "Monto", "Fecha"])
+    estilo_header(ws1, 1, 3, header_fill_green)
+
+    total_gastos = 0
+    for g in gastos:
+        ws1.append([g[0], float(g[1]), str(g[2])])
+        total_gastos += float(g[1])
+
+    ws1.append([])
+    ws1.append(["TOTAL", total_gastos, ""])
+    total_row = ws1.max_row
+    ws1.cell(total_row, 1).font = Font(bold=True)
+    ws1.cell(total_row, 2).font = Font(bold=True)
+    autoajustar(ws1)
+
+    # ── Hoja 2: Ingresos ────────────────────────────────────────────────────
+    ws2 = wb.create_sheet(f"Ingresos {mes}")
+    ws2.append(["Descripción", "Monto", "Fecha"])
+    estilo_header(ws2, 1, 3, header_fill_blue)
+
+    total_ingresos = 0
+    for i in ingresos:
+        ws2.append([i[0], float(i[1]), str(i[2])])
+        total_ingresos += float(i[1])
+
+    ws2.append([])
+    ws2.append(["TOTAL", total_ingresos, ""])
+    total_row = ws2.max_row
+    ws2.cell(total_row, 1).font = Font(bold=True)
+    ws2.cell(total_row, 2).font = Font(bold=True)
+    autoajustar(ws2)
+
+    # ── Hoja 3: Deudas y Vacas ──────────────────────────────────────────────
+    ws3 = wb.create_sheet("Deudas y Vacas")
+    ws3.append(["DEUDAS PENDIENTES", "", "", "", ""])
+    ws3.cell(1, 1).font = Font(bold=True, size=12)
+    ws3.append(["Tipo", "Persona", "Monto", "Descripción", "Fecha"])
+    estilo_header(ws3, 2, 5, header_fill_orange)
+
+    for d in deudas:
+        tipo = "Me deben" if d[0] == "prestado" else "Debo"
+        ws3.append([tipo, d[1], float(d[2]), d[3], str(d[4])])
+
+    ws3.append([])
+    ws3.append(["VACAS GRUPALES", "", ""])
+    ws3.cell(ws3.max_row, 1).font = Font(bold=True, size=12)
+    ws3.append(["Nombre", "Personas", "Total"])
+    estilo_header(ws3, ws3.max_row, 3, header_fill_purple)
+
+    for v in vacas:
+        por_persona = float(v[2]) / v[1] if v[1] > 0 else 0
+        ws3.append([v[0], v[1], float(v[2])])
+
+    autoajustar(ws3)
+
+    # ── Hoja 4: Resumen ─────────────────────────────────────────────────────
+    ws4 = wb.create_sheet("Resumen")
+    balance = total_ingresos - total_gastos
+    estado = "✅ Positivo" if balance >= 0 else "🔴 Negativo"
+
+    ws4.append(["RESUMEN FINANCIERO", mes])
+    ws4.cell(1, 1).font = Font(bold=True, size=14)
+    ws4.append([])
+    ws4.append(["Concepto", "Monto"])
+    estilo_header(ws4, 3, 2, header_fill_blue)
+    ws4.append(["Total Ingresos", total_ingresos])
+    ws4.append(["Total Gastos", total_gastos])
+    ws4.append(["Balance", balance])
+    ws4.append(["Estado", estado])
+    ws4.append([])
+    ws4.append(["Deudas pendientes", len(deudas)])
+    ws4.append(["Vacas activas", len(vacas)])
+
+    ws4.cell(6, 1).font = Font(bold=True)
+    ws4.cell(6, 2).font = Font(bold=True, color="1E7E34" if balance >= 0 else "DC3545")
+    autoajustar(ws4)
+
+    # ── Guardar en memoria y devolver ───────────────────────────────────────
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    return {
+        "output": f"📊 Reporte Excel de {mes} listo.",
+        "excel_buffer": buffer,
+        "excel_nombre": f"finanzas_{mes}.xlsx"
+    }

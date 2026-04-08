@@ -8,23 +8,29 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 MODELO_LLM = os.getenv("MODELO_LLM")
 
 PROMPT_ROUTER = """
-Clasifica el mensaje del usuario en UNA de estas intenciones:
-- guardar: quiere registrar un gasto personal
-- reporte_dia: quiere saber cuánto gastó hoy
-- reporte_mes: quiere saber cuánto gastó este mes
-- reporte_categoria: quiere ver gastos por categoría
-- editar: quiere eliminar o corregir un gasto
-- presupuesto: quiere establecer o consultar su presupuesto
-- crear_vaca: quiere crear una vaca o fondo grupal
-- agregar_vaca: quiere agregar gastos a una vaca existente
-- dividir_vaca: quiere dividir el total de una vaca entre personas
-- resumen_vaca: quiere ver el resumen de una vaca
-- registrar_deuda: quiere registrar que prestó o debe dinero
-- consultar_deudas: quiere ver deudas pendientes
-- pagar_deuda: quiere marcar una deuda como pagada
-- registrar_ingreso: quiere registrar que recibió dinero (salario, freelance, venta, etc.)
-- ver_ingresos: quiere ver sus ingresos del mes
-- balance_mes: quiere ver su balance real (ingresos menos gastos)
+Eres un clasificador de intenciones para un chatbot de finanzas personales.
+El usuario puede escribir con errores ortográficos, abreviaciones o de forma informal.
+Debes inferir la intención aunque el mensaje esté mal escrito.
+
+Clasifica en UNA de estas intenciones:
+- guardar: registrar un gasto o compra ("gaste", "compre", "pague", "me costo")
+- reporte_dia: gastos de hoy ("cuanto gaste hoy", "resumen hoy", "q gaste")
+- reporte_mes: gastos del mes ("este mes", "del mes", "mensual")
+- reporte_categoria: gastos por categoría ("por categoria", "en que gaste mas")
+- editar: eliminar o corregir gasto ("borra", "elimina", "quita", "me equivoque")
+- presupuesto: presupuesto mensual ("presupuesto", "limite", "cuanto puedo gastar")
+- crear_vaca: crear fondo grupal ("vaca", "fondo", "juntar plata", "pool")
+- agregar_vaca: agregar gastos a vaca ("agregar a vaca", "añadir a vaca", "gasto vaca")
+- dividir_vaca: dividir vaca entre personas ("dividir", "cuanto pone cada uno", "split")
+- resumen_vaca: ver resumen de vaca ("resumen vaca", "como va la vaca", "ver vaca")
+- mis_vacas: listar todas las vacas ("mis vacas", "que vacas tengo", "vacas activas")
+- registrar_deuda: registrar préstamo ("le preste", "me debe", "le di", "me presto", "le debo")
+- consultar_deudas: ver deudas ("quien me debe", "mis deudas", "deudas pendientes")
+- pagar_deuda: marcar deuda pagada ("me pago", "ya pague", "saldo deuda")
+- registrar_ingreso: registrar ingreso ("recibi", "me pagaron", "salario", "ingreso")
+- ver_ingresos: ver ingresos ("mis ingresos", "cuanto recibi")
+- balance_mes: balance ingresos vs gastos ("balance", "como voy", "cuanto me queda")
+- generar_excel: reporte en Excel ("excel", "reporte", "exportar", "descargar")
 
 Responde SOLO en JSON: {{"intencion": "..."}}
 
