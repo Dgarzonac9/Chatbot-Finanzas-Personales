@@ -15,13 +15,16 @@ Clasifica el mensaje del usuario en UNA de estas intenciones:
 - reporte_categoria: quiere ver gastos por categoría
 - editar: quiere eliminar o corregir un gasto
 - presupuesto: quiere establecer o consultar su presupuesto
-- crear_vaca: quiere crear una vaca o fondo grupal para un evento
+- crear_vaca: quiere crear una vaca o fondo grupal
 - agregar_vaca: quiere agregar gastos a una vaca existente
 - dividir_vaca: quiere dividir el total de una vaca entre personas
-- resumen_vaca: quiere ver el resumen o detalle de una vaca
-- registrar_deuda: quiere registrar que le prestó dinero a alguien o que él debe dinero
-- consultar_deudas: quiere ver quién le debe o a quién le debe
+- resumen_vaca: quiere ver el resumen de una vaca
+- registrar_deuda: quiere registrar que prestó o debe dinero
+- consultar_deudas: quiere ver deudas pendientes
 - pagar_deuda: quiere marcar una deuda como pagada
+- registrar_ingreso: quiere registrar que recibió dinero (salario, freelance, venta, etc.)
+- ver_ingresos: quiere ver sus ingresos del mes
+- balance_mes: quiere ver su balance real (ingresos menos gastos)
 
 Responde SOLO en JSON: {{"intencion": "..."}}
 

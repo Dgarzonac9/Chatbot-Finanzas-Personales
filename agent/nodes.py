@@ -674,3 +674,108 @@ def pagar_deuda(state: dict) -> dict:
         return {"output": f"✅ Deuda con *{persona}* marcada como pagada 🎉"}
     else:
         return {"output": f"No encontré deuda pendiente con '{persona}'."}
+    
+# ── Nodo 14: Registrar ingreso ─────────────────────────────────────────────
+
+def registrar_ingreso(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    texto = state["input"]
+
+    prompt = f"""
+    El usuario quiere registrar un ingreso de dinero.
+    Extrae en JSON:
+    {{
+      "descripcion": "...",
+      "monto": ...,
+      "fecha": "YYYY-MM-DD"
+    }}
+    Si no hay fecha usa hoy: {date.today()}
+    Texto: "{texto}"
+    """
+    resp = client.chat.completions.create(
+        model=MODELO_LLM,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    )
+    try:
+        params = json.loads(resp.choices[0].message.content)
+        descripcion = params.get("descripcion", "ingreso")
+        monto = float(params.get("monto", 0))
+        fecha = params.get("fecha", str(date.today()))
+    except Exception:
+        return {"output": "No pude entender. Intenta: 'recibí salario 2500000'"}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ingresos (user_id, descripcion, monto, fecha) VALUES (%s, %s, %s, %s)",
+                (user_id, descripcion, monto, fecha),
+            )
+
+    return {"output": f"✅ Ingreso registrado\n💵 {descripcion}: ${int(monto):,}\n📅 Fecha: {fecha}"}
+
+
+# ── Nodo 15: Ver ingresos del mes ──────────────────────────────────────────
+
+def ver_ingresos(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    mes = date.today().strftime("%Y-%m")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT descripcion, monto, fecha
+                FROM ingresos
+                WHERE user_id = %s AND TO_CHAR(fecha, 'YYYY-MM') = %s
+                ORDER BY fecha DESC
+                """,
+                (user_id, mes),
+            )
+            ingresos = cur.fetchall()
+            total = sum(float(i[1]) for i in ingresos)
+
+    if not ingresos:
+        return {"output": f"No registraste ingresos en {mes} 📭"}
+
+    detalle = "\n".join([f"  • {i[0]}: ${int(i[1]):,} ({i[2]})" for i in ingresos])
+    return {"output": f"💵 *Ingresos de {mes}*\n\n{detalle}\n\n💰 Total: ${int(total):,}"}
+
+
+# ── Nodo 16: Balance real del mes ──────────────────────────────────────────
+
+def balance_mes(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    mes = date.today().strftime("%Y-%m")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(monto), 0) FROM ingresos
+                WHERE user_id = %s AND TO_CHAR(fecha, 'YYYY-MM') = %s
+                """,
+                (user_id, mes),
+            )
+            total_ingresos = float(cur.fetchone()[0])
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(monto), 0) FROM gastos
+                WHERE user_id = %s AND TO_CHAR(fecha, 'YYYY-MM') = %s
+                """,
+                (user_id, mes),
+            )
+            total_gastos = float(cur.fetchone()[0])
+
+    balance = total_ingresos - total_gastos
+    emoji = "✅" if balance >= 0 else "🔴"
+    estado = "positivo" if balance >= 0 else "negativo"
+
+    return {"output": (
+        f"📊 *Balance {mes}*\n\n"
+        f"💵 Ingresos:  ${int(total_ingresos):,}\n"
+        f"💸 Gastos:    ${int(total_gastos):,}\n"
+        f"─────────────────\n"
+        f"{emoji} Balance {estado}: ${int(balance):,}"
+    )}

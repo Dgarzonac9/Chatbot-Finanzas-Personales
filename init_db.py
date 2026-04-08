@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS deudas (
     fecha DATE DEFAULT CURRENT_DATE,
     pagado BOOLEAN DEFAULT FALSE
 );
+            
+CREATE TABLE IF NOT EXISTS ingresos (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    descripcion VARCHAR(100),
+    monto DECIMAL(12,2),
+    fecha DATE DEFAULT CURRENT_DATE
+);
 """)
 
 conn.commit()
