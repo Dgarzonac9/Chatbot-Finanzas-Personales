@@ -1,28 +1,58 @@
-from agent.nodes import get_conn
+import psycopg2, os
+from dotenv import load_dotenv
 
-with get_conn() as conn:
-    with conn.cursor() as cur:
-        cur.execute("""
-            DROP TABLE IF EXISTS gastos CASCADE;
-            DROP TABLE IF EXISTS presupuestos CASCADE;
+load_dotenv()
 
-            CREATE TABLE gastos (
-                id        SERIAL PRIMARY KEY,
-                user_id   INTEGER NOT NULL,
-                categoria VARCHAR(255) NOT NULL,
-                monto     NUMERIC(12, 2) NOT NULL,
-                fecha     DATE NOT NULL
-            );
+conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+cur = conn.cursor()
 
-            CREATE TABLE presupuestos (
-                user_id INTEGER NOT NULL,
-                mes     VARCHAR(7) NOT NULL,
-                monto   NUMERIC(12, 2) NOT NULL,
-                PRIMARY KEY (user_id, mes)
-            );
+cur.execute("""
+CREATE TABLE IF NOT EXISTS gastos (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    categoria VARCHAR(100),
+    monto DECIMAL(12,2),
+    fecha DATE
+);
 
-            CREATE INDEX idx_gastos_user_fecha
-                ON gastos(user_id, fecha);
-        """)
+CREATE TABLE IF NOT EXISTS presupuestos (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    mes VARCHAR(7),
+    monto DECIMAL(12,2),
+    UNIQUE(user_id, mes)
+);
 
-print("Base de datos inicializada correctamente.")
+CREATE TABLE IF NOT EXISTS vacas (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    nombre VARCHAR(100),
+    num_personas INT DEFAULT 1,
+    cerrada BOOLEAN DEFAULT FALSE,
+    fecha_creacion DATE DEFAULT CURRENT_DATE
+);
+
+CREATE TABLE IF NOT EXISTS vaca_gastos (
+    id SERIAL PRIMARY KEY,
+    vaca_id INT REFERENCES vacas(id) ON DELETE CASCADE,
+    descripcion VARCHAR(100),
+    monto DECIMAL(12,2),
+    fecha DATE DEFAULT CURRENT_DATE
+);
+
+CREATE TABLE IF NOT EXISTS deudas (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    tipo VARCHAR(10),
+    persona VARCHAR(100),
+    monto DECIMAL(12,2),
+    descripcion TEXT,
+    fecha DATE DEFAULT CURRENT_DATE,
+    pagado BOOLEAN DEFAULT FALSE
+);
+""")
+
+conn.commit()
+cur.close()
+conn.close()
+print("✅ Tablas creadas correctamente")
