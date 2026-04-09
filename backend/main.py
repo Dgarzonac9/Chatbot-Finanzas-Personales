@@ -3,6 +3,7 @@ import io
 from contextlib import asynccontextmanager
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from agent import state
 from agent.graph import app as agente
 from fastapi import FastAPI, Request
 from dotenv import load_dotenv
@@ -41,7 +42,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if resultado.get("excel_buffer"):
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=resultado["excel_buffer"],
+                document=io.BytesIO(resultado["excel_buffer"]),
                 filename=resultado.get("excel_nombre", "reporte.xlsx"),
                 caption=resultado.get("output", "📊 Tu reporte Excel"),
             )

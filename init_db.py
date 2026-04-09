@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+print(os.getenv("DATABASE_URL"))
 conn = psycopg2.connect(os.getenv("DATABASE_URL"))
 cur = conn.cursor()
 
@@ -59,7 +60,7 @@ CREATE TABLE IF NOT EXISTS ingresos (
     fecha DATE DEFAULT CURRENT_DATE
 );
             
-CREATE TABLE prestamos (
+CREATE TABLE IF NOT EXISTS prestamos(
     id SERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
     persona VARCHAR(100) NOT NULL,

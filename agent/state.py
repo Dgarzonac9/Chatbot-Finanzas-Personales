@@ -6,5 +6,5 @@ class AgentState(TypedDict):
     user_id: int
     intencion: Optional[str]
     output: Optional[str]
-    excel_buffer: Optional[io.BytesIO]
+    excel_buffer: Optional[bytes]
     excel_nombre: Optional[str]
