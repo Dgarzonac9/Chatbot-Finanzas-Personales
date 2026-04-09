@@ -34,6 +34,7 @@ Clasifica en UNA de estas intenciones:
 - registrar_prestamo: yo presté dinero y quiero hacer seguimiento con abonos e interés ("yo le preste", "le di un prestamo formal", "con interes")- ver_prestamos: ver préstamos que hice ("mis prestamos", "quien me debe prestamo", "prestamos pendientes")
 - abonar_prestamo: registrar un pago parcial de un préstamo ("me abono", "me dio un abono", "pago algo")
 - cerrar_prestamo: marcar préstamo como pagado completo ("pago todo", "saldo completo", "termino de pagar")
+- ayuda: el usuario pregunta cómo funciona el bot, qué puede hacer, o escribe algo que no encaja en ninguna categoría ("como funciona", "que puedes hacer", "ayuda", "help", "hola")
 
 Responde SOLO en JSON: {{"intencion": "..."}}
 

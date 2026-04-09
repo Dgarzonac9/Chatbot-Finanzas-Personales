@@ -8,7 +8,8 @@ from agent.nodes import (
     registrar_deuda, consultar_deudas, pagar_deuda,
     registrar_ingreso, ver_ingresos, balance_mes,
     generar_excel, mis_vacas, registrar_prestamo,
-    ver_prestamos, abonar_prestamo, cerrar_prestamo
+    ver_prestamos, abonar_prestamo, cerrar_prestamo,
+    ayuda
 )
 
 graph = StateGraph(AgentState)
@@ -36,6 +37,7 @@ graph.add_node("registrar_prestamo", registrar_prestamo)
 graph.add_node("ver_prestamos",      ver_prestamos)
 graph.add_node("abonar_prestamo",    abonar_prestamo)
 graph.add_node("cerrar_prestamo",    cerrar_prestamo)
+graph.add_node("ayuda",             ayuda)
 
 graph.set_entry_point("router")
 
@@ -64,7 +66,8 @@ graph.add_conditional_edges(
         "registrar_prestamo": "registrar_prestamo",
         "ver_prestamos":      "ver_prestamos",
         "abonar_prestamo":    "abonar_prestamo",
-        "cerrar_prestamo":    "cerrar_prestamo"
+        "cerrar_prestamo":    "cerrar_prestamo",
+        "ayuda":             "ayuda"
     }
 )
 
@@ -75,7 +78,7 @@ todos_los_nodos = [
     "consultar_deudas", "pagar_deuda", "registrar_ingreso",
     "ver_ingresos", "balance_mes", "generar_excel", "mis_vacas",
     "registrar_prestamo", "ver_prestamos", "abonar_prestamo",
-    "cerrar_prestamo"
+    "cerrar_prestamo", "ayuda"
 ]
 for nodo in todos_los_nodos:
     graph.add_edge(nodo, END)

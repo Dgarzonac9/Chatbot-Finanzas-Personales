@@ -1318,3 +1318,18 @@ def cerrar_prestamo(state: dict) -> dict:
     except Exception as e:
         print(f"[Error cerrar_prestamo] {e}")
         return {"output": "❌ Error cerrando el préstamo."}
+# ── Nodo 23: Ayuda ────────────────────────────────────────────────
+
+def ayuda(state: dict) -> dict:
+    return {"output": (
+        "🤖 *¿Qué puedo hacer por ti?*\n\n"
+        "💸 *Gastos:* 'gasté 10k en comida'\n"
+        "📊 *Reportes:* 'reporte de hoy', 'reporte del mes'\n"
+        "💰 *Presupuesto:* 'mi presupuesto es 500000'\n"
+        "💵 *Ingresos:* 'recibí salario 2000000'\n"
+        "📈 *Balance:* 'cómo voy este mes'\n"
+        "🐄 *Vacas:* 'crear vaca Salida', 'agregar a vaca Salida: comida 50000'\n"
+        "🤝 *Deudas:* 'le debo 50000 a Juan', 'Juan me pagó'\n"
+        "💳 *Préstamos:* 'le presté 200000 a Carlos', 'Carlos me abonó 50000'\n"
+        "📋 *Excel:* 'generar excel'\n"
+    )}
