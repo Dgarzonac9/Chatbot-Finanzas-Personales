@@ -1,3 +1,4 @@
+import io
 import psycopg2, json, os
 import psycopg2.extras
 import psycopg2.pool
