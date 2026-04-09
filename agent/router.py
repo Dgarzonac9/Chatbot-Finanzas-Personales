@@ -31,6 +31,10 @@ Clasifica en UNA de estas intenciones:
 - ver_ingresos: ver ingresos ("mis ingresos", "cuanto recibi")
 - balance_mes: balance ingresos vs gastos ("balance", "como voy", "cuanto me queda")
 - generar_excel: reporte en Excel ("excel", "reporte", "exportar", "descargar")
+- registrar_prestamo: cuando yo le presté dinero a alguien con posible interés ("preste", "le di un prestamo", "le fié", "con interes")
+- ver_prestamos: ver préstamos que hice ("mis prestamos", "quien me debe prestamo", "prestamos pendientes")
+- abonar_prestamo: registrar un pago parcial de un préstamo ("me abono", "me dio un abono", "pago algo")
+- cerrar_prestamo: marcar préstamo como pagado completo ("pago todo", "saldo completo", "termino de pagar")
 
 Responde SOLO en JSON: {{"intencion": "..."}}
 

@@ -58,6 +58,20 @@ CREATE TABLE IF NOT EXISTS ingresos (
     monto DECIMAL(12,2),
     fecha DATE DEFAULT CURRENT_DATE
 );
+            
+CREATE TABLE prestamos (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    persona VARCHAR(100) NOT NULL,
+    monto NUMERIC(12,2) NOT NULL,
+    monto_pagado NUMERIC(12,2) DEFAULT 0,
+    descripcion TEXT DEFAULT '',
+    tasa_interes NUMERIC(5,2) DEFAULT 0,  -- % mensual, 0 = sin interés
+    fecha DATE DEFAULT CURRENT_DATE,
+    fecha_limite DATE,                     -- opcional, cuándo debe pagar
+    pagado BOOLEAN DEFAULT FALSE
+);
+
 """)
 
 conn.commit()

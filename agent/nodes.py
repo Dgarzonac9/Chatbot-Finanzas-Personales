@@ -88,40 +88,38 @@ def _validar_user_id(state: dict) -> int:
         raise ValueError(f"user_id inválido: {user_id!r}")
     return user_id
 
-
 def extraer_gasto_llm(texto: str):
     prompt = f"""
     El usuario puede escribir con errores ortográficos o de forma informal.
-    Interpreta el mensaje de forma flexible y extrae lo mejor que puedas.
+    Interpreta el mensaje de forma flexible.
 
-    El usuario quiere agregar gastos a una vaca grupal.
+    El usuario quiere registrar un gasto personal.
     Extrae en JSON:
     {{
-    "nombre_vaca": "...",
-    "gastos": [{{"descripcion": "...", "monto": ...}}, ...]
+      "categoria": "...",
+      "monto": ...,
+      "fecha": "YYYY-MM-DD"
     }}
-    Si el nombre tiene errores ortográficos, extrae igual la palabra más similar.
+    Categorías posibles: comida, transporte, entretenimiento, salud, ropa, servicios, otro.
+    Si no menciona fecha usa hoy: {date.today()}
+    Si escribe "10k" interpreta como 10000, "20k" como 20000, etc.
     Texto: "{texto}"
     """
     resp = client.chat.completions.create(
         model=MODELO_LLM,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+        messages=[{{"role": "user", "content": prompt}}],
+        response_format={{"type": "json_object"}},
     )
     try:
-        # response_format json_object garantiza JSON válido, no se necesita doble parse
         data = json.loads(resp.choices[0].message.content)
-        if not data.get("fecha"):
-            data["fecha"] = str(date.today())
         return (
-            data.get("categoría", "desconocido"),
+            data.get("categoria", "otro"),
             float(data.get("monto", 0)),
-            data["fecha"],
+            data.get("fecha", str(date.today())),
         )
     except Exception as e:
         print("Error extrayendo gasto:", e)
-        return "desconocido", 0.0, str(date.today())
-
+        return "otro", 0.0, str(date.today())
 
 def formatear_respuesta(datos_crudos: str) -> str:
     """Convierte datos en una respuesta natural con el LLM."""
@@ -933,6 +931,18 @@ def generar_excel(state: dict) -> dict:
             )
             vacas = cur.fetchall()
 
+            # Préstamos pendientes
+            cur.execute(
+                """
+                SELECT persona, monto, monto_pagado, tasa_interes, descripcion, fecha, fecha_limite
+                FROM prestamos
+                WHERE user_id = %s AND pagado = FALSE
+                ORDER BY fecha DESC
+                """,
+                (user_id,),
+            )
+            prestamos = cur.fetchall()
+
     # ── Crear Excel ─────────────────────────────────────────────────────────
     wb = openpyxl.Workbook()
 
@@ -1014,7 +1024,38 @@ def generar_excel(state: dict) -> dict:
 
     autoajustar(ws3)
 
-    # ── Hoja 4: Resumen ─────────────────────────────────────────────────────
+    # ── Hoja 4: Préstamos ───────────────────────────────────────────────────
+    header_fill_teal = PatternFill("solid", fgColor="0097A7")
+    ws_p = wb.create_sheet("Préstamos")
+    ws_p.append(["Persona", "Monto", "Abonado", "Pendiente", "Interés %", "Descripción", "Fecha", "Vence"])
+    estilo_header(ws_p, 1, 8, header_fill_teal)
+
+    total_prestado = 0
+    for p in prestamos:
+        persona, monto, pagado, tasa, desc, fecha, limite = p
+        monto = float(monto)
+        pagado = float(pagado)
+        pendiente = monto - pagado
+        total_prestado += pendiente
+        ws_p.append([
+            persona,
+            monto,
+            pagado,
+            pendiente,
+            float(tasa),
+            desc,
+            str(fecha),
+            str(limite) if limite else "Sin fecha",
+        ])
+
+    ws_p.append([])
+    ws_p.append(["TOTAL PENDIENTE", "", "", total_prestado, "", "", "", ""])
+    total_row = ws_p.max_row
+    ws_p.cell(total_row, 1).font = Font(bold=True)
+    ws_p.cell(total_row, 4).font = Font(bold=True)
+    autoajustar(ws_p)
+
+    # ── Hoja 5: Resumen ─────────────────────────────────────────────────────
     ws4 = wb.create_sheet("Resumen")
     balance = total_ingresos - total_gastos
     estado = "✅ Positivo" if balance >= 0 else "🔴 Negativo"
@@ -1031,6 +1072,7 @@ def generar_excel(state: dict) -> dict:
     ws4.append([])
     ws4.append(["Deudas pendientes", len(deudas)])
     ws4.append(["Vacas activas", len(vacas)])
+    ws4.append(["Total prestado pendiente", total_prestado])
 
     ws4.cell(6, 1).font = Font(bold=True)
     ws4.cell(6, 2).font = Font(bold=True, color="1E7E34" if balance >= 0 else "DC3545")
@@ -1046,3 +1088,213 @@ def generar_excel(state: dict) -> dict:
         "excel_buffer": buffer,
         "excel_nombre": f"finanzas_{mes}.xlsx"
     }
+
+# ── Nodo 19: Registrar préstamo ────────────────────────────────────────────
+
+def registrar_prestamo(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    texto = state["input"]
+
+    prompt = f"""
+    El usuario prestó dinero a alguien.
+    Extrae en JSON:
+    {{
+      "persona": "...",
+      "monto": ...,
+      "descripcion": "...",
+      "tasa_interes": ... (número % mensual, 0 si no menciona interés),
+      "fecha_limite": "YYYY-MM-DD" (null si no menciona fecha límite)
+    }}
+    Fecha hoy: {date.today()}
+    Texto: "{texto}"
+    """
+    resp = client.chat.completions.create(
+        model=MODELO_LLM,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={{"type": "json_object"}},
+    )
+    try:
+        params = json.loads(resp.choices[0].message.content)
+    except Exception:
+        return {{"output": "No pude entender. Intenta: 'le presté 200000 a Carlos para el arriendo'"}}
+
+    persona = params.get("persona", "")
+    monto = float(params.get("monto", 0))
+    descripcion = params.get("descripcion", "")
+    tasa = float(params.get("tasa_interes", 0))
+    fecha_limite = params.get("fecha_limite")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO prestamos (user_id, persona, monto, descripcion, tasa_interes, fecha_limite)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (user_id, persona, monto, descripcion, tasa, fecha_limite),
+            )
+
+    interes_msg = f" con {tasa}% de interés mensual" if tasa > 0 else " sin interés"
+    limite_msg = f"\n📅 Fecha límite: {fecha_limite}" if fecha_limite else ""
+    return {{"output": (
+        f"✅ Préstamo registrado\n"
+        f"👤 Prestado a: *{persona}*\n"
+        f"💵 Monto: ${int(monto):,}{interes_msg}\n"
+        f"📝 {descripcion}{limite_msg}"
+    )}}
+
+
+# ── Nodo 20: Ver préstamos pendientes ──────────────────────────────────────
+
+def ver_prestamos(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT persona, monto, monto_pagado, tasa_interes, descripcion, fecha, fecha_limite
+                FROM prestamos
+                WHERE user_id = %s AND pagado = FALSE
+                ORDER BY fecha DESC
+                """,
+                (user_id,),
+            )
+            prestamos = cur.fetchall()
+
+    if not prestamos:
+        return {{"output": "No tienes préstamos pendientes por cobrar 🎉"}}
+
+    respuesta = "💰 *Préstamos pendientes por cobrar*\n\n"
+    total = 0
+
+    for p in prestamos:
+        persona, monto, pagado, tasa, desc, fecha, limite = p
+        monto = float(monto)
+        pagado = float(pagado)
+        pendiente = monto - pagado
+
+        # Calcular interés acumulado si aplica
+        if tasa > 0:
+            from datetime import date as d_
+            meses = max(1, (d_.today() - fecha).days // 30)
+            interes = monto * (tasa / 100) * meses
+            total_con_interes = pendiente + interes
+            interes_str = f" (+${int(interes):,} interés acum.)"
+        else:
+            total_con_interes = pendiente
+            interes_str = ""
+
+        total += total_con_interes
+        limite_str = f" | vence {limite}" if limite else ""
+        abono_str = f" | abonado: ${int(pagado):,}" if pagado > 0 else ""
+
+        respuesta += (
+            f"👤 *{persona}*: ${int(pendiente):,}{interes_str}{abono_str}{limite_str}\n"
+            f"   📝 {desc}\n\n"
+        )
+
+    respuesta += f"💵 *Total por cobrar: ${int(total):,}*"
+    return {{"output": respuesta}}
+
+
+# ── Nodo 21: Registrar abono a préstamo ───────────────────────────────────
+
+def abonar_prestamo(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    texto = state["input"]
+
+    prompt = f"""
+    El usuario quiere registrar un abono a un préstamo que hizo.
+    Extrae en JSON: {{"persona": "...", "monto_abono": ...}}
+    Texto: "{texto}"
+    """
+    resp = client.chat.completions.create(
+        model=MODELO_LLM,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={{"type": "json_object"}},
+    )
+    try:
+        params = json.loads(resp.choices[0].message.content)
+        persona = params.get("persona", "")
+        abono = float(params.get("monto_abono", 0))
+    except Exception:
+        return {{"output": "No pude entender. Intenta: 'Carlos me abonó 50000'"}}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, monto, monto_pagado FROM prestamos
+                WHERE user_id = %s AND LOWER(persona) LIKE LOWER(%s) AND pagado = FALSE
+                ORDER BY id DESC LIMIT 1
+                """,
+                (user_id, f"%{persona}%"),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {{"output": f"No encontré préstamo pendiente con '{persona}'."}}
+
+            prestamo_id = row[0]
+            monto_total = float(row[1])
+            ya_pagado = float(row[2])
+            nuevo_pagado = ya_pagado + abono
+            pendiente = monto_total - nuevo_pagado
+
+            if nuevo_pagado >= monto_total:
+                cur.execute(
+                    "UPDATE prestamos SET monto_pagado = %s, pagado = TRUE WHERE id = %s",
+                    (nuevo_pagado, prestamo_id),
+                )
+                return {{"output": f"✅ *{persona}* pagó el préstamo completo 🎉\n💵 Total recibido: ${int(nuevo_pagado):,}"}}
+            else:
+                cur.execute(
+                    "UPDATE prestamos SET monto_pagado = %s WHERE id = %s",
+                    (nuevo_pagado, prestamo_id),
+                )
+
+    return {{"output": (
+        f"✅ Abono registrado de *{persona}*\n"
+        f"💵 Abono: ${int(abono):,}\n"
+        f"✔️ Total pagado: ${int(nuevo_pagado):,}\n"
+        f"⏳ Pendiente: ${int(pendiente):,}"
+    )}}
+
+
+# ── Nodo 22: Marcar préstamo como pagado ───────────────────────────────────
+
+def cerrar_prestamo(state: dict) -> dict:
+    user_id = _validar_user_id(state)
+    texto = state["input"]
+
+    prompt = f"""
+    El usuario quiere marcar un préstamo como completamente pagado.
+    Extrae en JSON: {{"persona": "..."}}
+    Texto: "{texto}"
+    """
+    resp = client.chat.completions.create(
+        model=MODELO_LLM,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={{"type": "json_object"}},
+    )
+    try:
+        params = json.loads(resp.choices[0].message.content)
+        persona = params.get("persona", "")
+    except Exception:
+        return {{"output": "No pude entender. Intenta: 'Carlos pagó todo'"}}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE prestamos SET pagado = TRUE
+                WHERE user_id = %s AND LOWER(persona) LIKE LOWER(%s) AND pagado = FALSE
+                """,
+                (user_id, f"%{persona}%"),
+            )
+            filas = cur.rowcount
+
+    if filas:
+        return {{"output": f"✅ Préstamo con *{persona}* cerrado como pagado completo 🎉"}}
+    else:
+        return {{"output": f"No encontré préstamo pendiente con '{persona}'."}}
