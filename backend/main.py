@@ -6,6 +6,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from agent import state
 from agent.graph import app as agente
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 
@@ -38,7 +39,6 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         )
 
-        # ── Si hay Excel lo envía como documento ──────────────────────────
         if resultado.get("excel_buffer"):
             await context.bot.send_document(
                 chat_id=chat_id,
@@ -77,6 +77,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# ── Modelos ───────────────────────────────────────────────────────────────────
+
+class ConsultaRequest(BaseModel):
+    mensaje: str
+    user_id: int = 1
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
 @app.get("/")
 def health():
     return {"status": "ok"}
@@ -93,23 +101,19 @@ async def webhook(request: Request):
         return {"ok": False, "error": str(e)}
 
 @app.post("/api/consultar")
-async def consultar_agente(request: Request):
-    data = await request.json()
-    mensaje = data.get("mensaje")
-    user_id = data.get("user_id", 1)
-    
+async def consultar_agente(body: ConsultaRequest):
     resultado = await asyncio.to_thread(
         agente.invoke,
         {
-            "input": mensaje,
-            "user_id": user_id,
+            "input": body.mensaje,
+            "user_id": body.user_id,
             "intencion": None,
             "output": None,
             "excel_buffer": None,
             "excel_nombre": None,
         }
     )
-    
+
     return {
         "respuesta": resultado.get("output"),
         "intencion": resultado.get("intencion"),
