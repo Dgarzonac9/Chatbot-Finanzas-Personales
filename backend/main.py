@@ -91,3 +91,26 @@ async def webhook(request: Request):
     except Exception as e:
         print("Error en webhook:", e)
         return {"ok": False, "error": str(e)}
+
+@app.post("/api/consultar")
+async def consultar_agente(request: Request):
+    data = await request.json()
+    mensaje = data.get("mensaje")
+    user_id = data.get("user_id", 1)
+    
+    resultado = await asyncio.to_thread(
+        agente.invoke,
+        {
+            "input": mensaje,
+            "user_id": user_id,
+            "intencion": None,
+            "output": None,
+            "excel_buffer": None,
+            "excel_nombre": None,
+        }
+    )
+    
+    return {
+        "respuesta": resultado.get("output"),
+        "intencion": resultado.get("intencion"),
+    }
