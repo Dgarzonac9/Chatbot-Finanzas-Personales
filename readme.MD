@@ -37,7 +37,7 @@ Este bot vive donde ya estás — **Telegram** — y entiende lenguaje natural. 
 
 | Gastos · Ingresos · Presupuesto | Vacas · Préstamos | Reporte de Vacas · Excel | Reporte del día |
 |:---:|:---:|:---:|:---:|
-| <img src="assets/screenshots/demo1.jpeg" width="200"/> | <img src="assets/screenshots/demo2.jpeg" width="200"/> | <img src="assets/screenshots/demo3.jpeg" width="200"/> | <img src="assets/screenshots/demo4.jpeg" width="200"/> |
+| <img src="assets/demo1.jpeg" width="200"/> | <img src="assets/demo2.jpeg" width="200"/> | <img src="assets/demo3.jpeg" width="200"/> | <img src="assets/demo4.jpeg" width="200"/> |
 
 </div>
 
